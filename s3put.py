@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2006,2007,2008 Mitch Garnaat http://garnaat.org/
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -25,6 +25,8 @@ import sys
 import os
 import boto
 
+from boto.compat import six
+
 try:
     # multipart portions copyright Fabian Topfstedt
     # https://gist.github.com/924094
@@ -43,8 +45,12 @@ try:
 except ImportError as err:
     multipart_capable = False
     usage_flag_multipart_capable = ""
+    if six.PY2:
+        attribute = 'message'
+    else:
+        attribute = 'msg'
     usage_string_multipart_capable = '\n\n     "' + \
-        err.message[len('No module named '):] + \
+        getattr(err, attribute)[len('No module named '):] + \
         '" is missing for multipart support '
 
 
@@ -122,12 +128,12 @@ SYNOPSIS
 
 
 def usage(status=1):
-    print usage_string
+    print(usage_string)
     sys.exit(status)
 
 
 def submit_cb(bytes_so_far, total_bytes):
-    print '%d bytes transferred / %d bytes total' % (bytes_so_far, total_bytes)
+    print('%d bytes transferred / %d bytes total' % (bytes_so_far, total_bytes))
 
 
 def get_key_name(fullpath, prefix, key_prefix):
@@ -151,12 +157,12 @@ def _upload_part(bucketname, aws_key, aws_secret, multipart_id, part_num,
     Uploads a part with retries.
     """
     if debug == 1:
-        print "_upload_part(%s, %s, %s)" % (source_path, offset, bytes)
+        print("_upload_part(%s, %s, %s)" % (source_path, offset, bytes))
 
     def _upload(retries_left=amount_of_retries):
         try:
             if debug == 1:
-                print 'Start uploading part #%d ...' % part_num
+                print('Start uploading part #%d ...' % part_num)
             conn = S3Connection(aws_key, aws_secret)
             conn.debug = debug
             bucket = conn.get_bucket(bucketname)
@@ -167,21 +173,21 @@ def _upload_part(bucketname, aws_key, aws_secret, multipart_id, part_num,
                         mp.upload_part_from_file(fp=fp, part_num=part_num,
                                                  cb=cb, num_cb=num_cb)
                     break
-        except Exception, exc:
+        except Exception as exc:
             if retries_left:
                 _upload(retries_left=retries_left - 1)
             else:
-                print 'Failed uploading part #%d' % part_num
+                print('Failed uploading part #%d' % part_num)
                 raise exc
         else:
             if debug == 1:
-                print '... Uploaded part #%d' % part_num
+                print('... Uploaded part #%d' % part_num)
 
     _upload()
 
 def check_valid_region(conn, region):
     if conn is None:
-        print 'Invalid region (%s)' % region
+        print('Invalid region (%s)' % region)
         sys.exit(1)
 
 def multipart_upload(bucketname, aws_key, aws_secret, source_path, keyname,
@@ -225,8 +231,10 @@ def multipart_upload(bucketname, aws_key, aws_secret, source_path, keyname,
         mp.complete_upload()
         key = bucket.get_key(keyname)
         key.set_acl(acl)
+        return source_size
     else:
         mp.cancel_upload()
+        return 0
 
 
 def singlepart_upload(bucket, key_name, fullpath, *kargs, **kwargs):
@@ -234,7 +242,7 @@ def singlepart_upload(bucket, key_name, fullpath, *kargs, **kwargs):
     Single upload.
     """
     k = bucket.new_key(key_name)
-    k.set_contents_from_filename(fullpath, *kargs, **kwargs)
+    return k.set_contents_from_filename(fullpath, *kargs, **kwargs)
 
 
 def expand_path(path):
@@ -321,7 +329,7 @@ def main():
             if multipart_capable:
                 multipart_requested = True
             else:
-                print "multipart upload requested but not capable"
+                print("multipart upload requested but not capable")
                 sys.exit(4)
         if o == '--region':
             regions = boto.s3.regions()
@@ -336,7 +344,7 @@ def main():
         usage(2)
 
     if not bucket_name:
-        print "bucket name is required!"
+        print("bucket name is required!")
         usage(3)
 
     connect_args = {
@@ -361,23 +369,23 @@ def main():
 
             # Classic region will be '', any other will have a name
             if location:
-                print 'Bucket exists in %s but no host or region given!' % location
+                print('Bucket exists in %s but no host or region given!' % location)
 
                 # Override for EU, which is really Ireland according to the docs
                 if location == 'EU':
                     location = 'eu-west-1'
 
-                print 'Automatically setting region to %s' % location
+                print('Automatically setting region to %s' % location)
 
                 # Here we create a new connection, and then take the existing
                 # bucket and set it to use the new connection
                 c = boto.s3.connect_to_region(location, **connect_args)
                 c.debug = debug
                 b.connection = c
-        except Exception, e:
+        except Exception as e:
             if debug > 0:
-                print e
-            print 'Could not get bucket region info, skipping...'
+                print(e)
+            print('Could not get bucket region info, skipping...')
 
     existing_keys_to_check_against = []
     files_to_check_for_upload = []
@@ -388,7 +396,7 @@ def main():
         if os.path.isdir(path):
             if no_overwrite:
                 if not quiet:
-                    print 'Getting list of existing keys to check against'
+                    print('Getting list of existing keys to check against')
                 for key in b.list(get_key_name(path, prefix, key_prefix)):
                     existing_keys_to_check_against.append(key.name)
             for root, dirs, files in os.walk(path):
@@ -409,7 +417,7 @@ def main():
 
         # we are trying to upload something unknown
         else:
-            print "I don't know what %s is, so i can't upload it" % path
+            print("I don't know what %s is, so i can't upload it" % path)
 
     for fullpath in files_to_check_for_upload:
         key_name = get_key_name(fullpath, prefix, key_prefix)
@@ -417,31 +425,35 @@ def main():
         if no_overwrite and key_name in existing_keys_to_check_against:
             if b.get_key(key_name):
                 if not quiet:
-                    print 'Skipping %s as it exists in s3' % fullpath
+                    print('Skipping %s as it exists in s3' % fullpath)
                 continue
 
         if not quiet:
-            print 'Copying %s to %s/%s' % (fullpath, bucket_name, key_name)
+            print('Copying %s to %s/%s' % (fullpath, bucket_name, key_name))
 
         if not no_op:
             # 0-byte files don't work and also don't need multipart upload
             if os.stat(fullpath).st_size != 0 and multipart_capable and \
                     multipart_requested:
-                multipart_upload(bucket_name, aws_access_key_id,
+                bytes = multipart_upload(bucket_name, aws_access_key_id,
                                  aws_secret_access_key, fullpath, key_name,
                                  reduced, debug, cb, num_cb,
                                  grant or 'private', headers,
                                  region=region or DEFAULT_REGION)
-                if delete:
-                    print 'Removing %s' % (fullpath)
-                    os.remove(fullpath)
+                if bytes > 0:
+                    print 'Upload complete'
+                    if delete:
+                        print 'Removing %s' % (fullpath)
+                        os.remove(fullpath)
             else:
-                singlepart_upload(b, key_name, fullpath, cb=cb, num_cb=num_cb,
+                bytes = singlepart_upload(b, key_name, fullpath, cb=cb, num_cb=num_cb,
                                   policy=grant, reduced_redundancy=reduced,
                                   headers=headers)
-                if delete:
-                    print 'Removing %s' % (fullpath)
-                    os.remove(fullpath)
+                if bytes > 0:
+                    print 'Upload complete'
+                    if delete:
+                        print 'Removing %s' % (fullpath)
+                        os.remove(fullpath)
 
 if __name__ == "__main__":
     main()
